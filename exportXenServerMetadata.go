@@ -2,11 +2,16 @@ package main
 
 // ################## imports
 import (
+	"bytes"
 	"encoding/xml"
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os"
+	"os/exec"
+	"strconv"
+	"strings"
 )
 
 // ################## global variables
@@ -75,6 +80,9 @@ type Snapshot struct {
 }
 
 // ############################# FUNCTIONS
+
+// parseCommandOptions is the capsuled function for checking
+// the command line parameter.
 func parseCommandOptions() {
 	//flag.StringVar(&xeBinary, "xebinary", xeBinary, "Absolute path to xe binary including executable.")
 
@@ -91,22 +99,121 @@ func parseCommandOptions() {
 		os.Exit(0)
 	}
 
+	// check if an outfile is specified.
 	if len(exportFile) == 0 {
 		exportFile = "vms.export.example.xml"
-		fmt.Println("No export file given, using default: " + exportFile)
+		log.Fatal("No export file given. Exiting...")
 	}
 }
 
+// getVms returns an array of all uuid of vms via xe command line.
+// The set of vms can be filtered by xe command line filter, e.g. power-state=running.
+// For filter, please consult the xe command line reference:
+//  https://docs.citrix.com/en-us/citrix-hypervisor/command-line-interface.html
+func getVms(xefilter string) []string {
+	// validate xe filter expression
+	if !validateXeFilter(xefilter) {
+		log.Fatal("Wrong filter specified. Exiting...")
+	}
+
+	// run xe vm-list --minimal to get all uuids of vms in a comma separated list
+	cmd := exec.Command(xeBinary, "vm-list", "--minimal")
+	// buffer to read cmd output
+	var out bytes.Buffer
+	//assign cmd stdout to buffer
+	cmd.Stdout = &out
+
+	// check command for errors
+	err := cmd.Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	//return array of uuids of all vms
+	return strings.Split(string(out.Bytes()), ",")
+}
+
+// validateXeFilter does a rudimentary validation of the given
+// filter as string for the xe command and returns true if
+// filter is correct otherwise false.
+//
+// Actually only the following filter are supported:
+// * power-state=running
+func validateXeFilter(filter2validate string) bool {
+	switch filter2validate {
+	case "power-state=running":
+		log.Printf("Using filter %v", filter2validate)
+		return true
+	default:
+		log.Printf("No filter defined, using none.")
+	}
+	return false
+}
+
+func getVmData(uuid string, param string) string {
+
+	// run xe vm-list --minimal to get all uuids of vms in a comma separated list
+	cmd := exec.Command(xeBinary, "vm-list", "uuid="+uuid, "params="+param, "--minimal")
+	// buffer to read cmd output
+	var out bytes.Buffer
+	//assign cmd stdout to buffer
+	cmd.Stdout = &out
+
+	// check command for errors
+	err := cmd.Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	//return array of uuids of all vms
+	return string(out.Bytes())
+}
+
+func getVm(uuid string) map[string]string {
+	var vm map[string]string
+	vm = make(map[string]string)
+	vm["uuid"] = uuid
+	vm["name-label"] = getVmData(uuid, "name-label")
+	return vm
+}
+
+func getVmSnapshots(uuid string) []string {
+	return nil
+}
+
+func getVmSnapshot(uuid string) map[string]string {
+	return nil
+}
+
+func getVmVbds(uuid string) []string {
+	return nil
+}
+
+func getVmVbd(uuid string) map[string]string {
+	return nil
+}
+
+func getVmParents(uuid string) []string {
+	return nil
+}
+
+func getVmParent(uuid string) map[string]string {
+	return nil
+}
+
+// generateExampleXML creates a vm with all supported devices,
+// e.g. VBDs, Snapshots, Parents.
+// Thsi functions is for testing purposes only.
 func generateExampleXML() VirtualMachines {
 	Sn := &Snapshots{}
-	s1 := &Snapshot{UUID: "980ac4d0-d408-11e9-80e3-84a93e00fae3", NameLable: "ADM-WIKI", NameDescription: "", IsVmssSnapshot: "false"}
-	s2 := &Snapshot{UUID: "980ac4d0-d408-11e9-80e3-84a93e00fae4", NameLable: "ADM-WIKI2", NameDescription: "", IsVmssSnapshot: "false"}
+	s1 := &Snapshot{UUID: "980ac4d0-d408-11e9-80e3-84a93e00fae3", NameLable: "Snapshot 1", NameDescription: "", IsVmssSnapshot: "false"}
+	s2 := &Snapshot{UUID: "980ac4d0-d408-11e9-80e3-84a93e00fae4", NameLable: "Snapshot 2", NameDescription: "", IsVmssSnapshot: "false"}
 	Sn.Snaps = append(Sn.Snaps, *s1)
 	Sn.Snaps = append(Sn.Snaps, *s2)
 
 	VBn := &VBDS{}
-	vb1 := &VBD{UUID: "31efb927-5130-8be4-1738-dd3051969ea0", VbdType: "Disk", VdiNameLabel: "ADM-WIKI 0"}
-	vb2 := &VBD{UUID: "31efb927-5130-8be4-1738-dd3051969ea1", VbdType: "Disk", VdiNameLabel: "ADM-WIKI 1"}
+	vb1 := &VBD{UUID: "31efb927-5130-8be4-1738-dd3051969ea0", VbdType: "Disk", VdiNameLabel: "HDD 0"}
+	vb2 := &VBD{UUID: "31efb927-5130-8be4-1738-dd3051969ea1", VbdType: "Disk", VdiNameLabel: "HDD 1"}
 	VBn.Vbds = append(VBn.Vbds, *vb1)
 	VBn.Vbds = append(VBn.Vbds, *vb2)
 
@@ -115,8 +222,62 @@ func generateExampleXML() VirtualMachines {
 	Pn.Ps = append(Pn.Ps, *p1)
 
 	VMn := &VirtualMachines{}
-	vm1 := &VirtualMachine{NameLabel: "ADM-XWiki", UUID: "fad84dd9-fc06-9cee-7e38-30da28de0cb6", Ps: *Pn, VBDs: *VBn, Snaps: *Sn}
+	vm1 := &VirtualMachine{NameLabel: "TestVM", UUID: "fad84dd9-fc06-9cee-7e38-30da28de0cb6", Ps: *Pn, VBDs: *VBn, Snaps: *Sn}
 	VMn.Vms = append(VMn.Vms, *vm1)
+
+	return *VMn
+}
+
+// generate the XML object for a single vm by its uuid
+func generateVmXML(uuid string) VirtualMachine {
+
+	// creating snapshot objects
+	Sn := &Snapshots{}
+	var tempSnapshots []string = getVmSnapshots(uuid)
+
+	// iterating over all snapshot uuid for vm with uuid
+	for index := 0; index < len(tempSnapshots); index++ {
+		var tempSnapshot map[string]string = getVmSnapshot(tempSnapshots[index])
+		s := &Snapshot{UUID: tempSnapshot["uuid"], NameLable: tempSnapshot["name-label"], NameDescription: tempSnapshot["name-description"], IsVmssSnapshot: tempSnapshot["is-vmss-snapshot"]}
+		Sn.Snaps = append(Sn.Snaps, *s)
+	}
+
+	// creating VBDs objects
+	VBn := &VBDS{}
+	var tempVbds []string = getVmVbds(uuid)
+
+	// iterating over all vbd uuid for vm with uuid
+	for index := 0; index < len(tempSnapshots); index++ {
+		var tempVbd map[string]string = getVmVbd(tempVbds[index])
+		vb := &VBD{UUID: tempVbd["uuid"], VbdType: tempVbd["type"], VdiNameLabel: tempVbd["vdi-name-label"]}
+		VBn.Vbds = append(VBn.Vbds, *vb)
+	}
+
+	// creating Parent objects
+	Pn := &Parents{}
+	var tempParents []string = getVmParents(uuid)
+
+	// iterating over all parent uuid for parent with uuid
+	for index := 0; index < len(tempParents); index++ {
+		var tempParent map[string]string = getVmParent(tempParents[index])
+		ptemp, _ := strconv.ParseBool(tempParent["selfparent"])
+		p := &Parent{UUID: tempParent["uuid"], Selfparent: ptemp}
+		Pn.Ps = append(Pn.Ps, *p)
+	}
+
+	// creating our vm with all attributes
+	var tempVm map[string]string = getVm(uuid)
+	vm := &VirtualMachine{NameLabel: tempVm["name-label"], UUID: tempVm["uuid"], Ps: *Pn, VBDs: *VBn, Snaps: *Sn}
+
+	return *vm
+}
+
+func generateVmsXML(uuids []string) VirtualMachines {
+	VMn := &VirtualMachines{}
+	for index := 0; index < len(uuids); index++ {
+		var tempVm VirtualMachine = generateVmXML(uuids[index])
+		VMn.Vms = append(VMn.Vms, tempVm)
+	}
 
 	return *VMn
 }
@@ -127,11 +288,13 @@ func main() {
 	// parse command line options
 	parseCommandOptions()
 
-	// we initialize our Users array
+	// to generate an example XML file with one VM comment out the following line
 	vms := generateExampleXML()
 
+	// create the export file
 	file, _ := os.Create(exportFile)
 
+	// get an writer for the export file
 	xmlWriter := io.Writer(file)
 
 	enc := xml.NewEncoder(xmlWriter)
