@@ -24,10 +24,13 @@ var exportFile string = ""
 // xe binary which is used to import the metadata
 var xeBinary string = "/usr/bin/xe"
 
+// VirtualMachines contain none or many VirtualMachine.
 type VirtualMachines struct {
 	XMLName xml.Name         `xml:"vms"`
 	Vms     []VirtualMachine `xml:"vm"`
 }
+
+// VirtualMachine represents a vm
 type VirtualMachine struct {
 	XMLName   xml.Name  `xml:"vm"`
 	NameLabel string    `xml:"name,attr"`
@@ -37,26 +40,26 @@ type VirtualMachine struct {
 	Snaps     Snapshots `xml:"snapshots"`
 }
 
-// list of parents of a vm
+// Parents of a vm as list
 type Parents struct {
 	XMLName xml.Name `xml:"parents"`
 	Ps      []Parent `xml:"parent"`
 }
 
-// parent of a vm, part of the list
+// Parent of a vm, part of the list
 type Parent struct {
 	XMLName    xml.Name `xml:"parent"`
 	UUID       string   `xml:"uuid,attr"`
 	Selfparent bool     `xml:"selfparent,attr"`
 }
 
-// list of vbds of a vm
+// VBDS of a vm as list
 type VBDS struct {
 	XMLName xml.Name `xml:"vbds"`
 	Vbds    []VBD    `xml:"vbd"`
 }
 
-// vbd of a vm, part of the list
+// VBD of a vm, part of the list
 type VBD struct {
 	XMLName      xml.Name `xml:"vbd"`
 	UUID         string   `xml:"uuid,attr"`
@@ -64,13 +67,13 @@ type VBD struct {
 	VdiNameLabel string   `xml:"vdi-name-label,attr"`
 }
 
-// list of snapshots of a vm
+// Snapshots of a vm as list.
 type Snapshots struct {
 	XMLName xml.Name   `xml:"snapshots"`
 	Snaps   []Snapshot `xml:"snapshot"`
 }
 
-// snapshot of a vm, part of the list
+// Snapshot of a vm, part of the list.
 type Snapshot struct {
 	XMLName         xml.Name `xml:"snapshot"`
 	UUID            string   `xml:"uuid,atrr"`
@@ -106,11 +109,11 @@ func parseCommandOptions() {
 	}
 }
 
-// getVms returns an array of all uuid of vms via xe command line.
+// getVMs returns an array of all uuid of vms via xe command line.
 // The set of vms can be filtered by xe command line filter, e.g. power-state=running.
 // For filter, please consult the xe command line reference:
 //  https://docs.citrix.com/en-us/citrix-hypervisor/command-line-interface.html
-func getVms(xefilter string) []string {
+func getVMs(xefilter string) []string {
 	// validate xe filter expression
 	if !validateXeFilter(xefilter) {
 		log.Fatal("Wrong filter specified. Exiting...")
@@ -138,7 +141,7 @@ func getVms(xefilter string) []string {
 // filter is correct otherwise false.
 //
 // Actually only the following filter are supported:
-// * power-state=running
+// * power-state=runningreturn getVmObjectsAsUuidList(uuid, "params=snapshots")
 func validateXeFilter(filter2validate string) bool {
 	switch filter2validate {
 	case "power-state=running":
@@ -150,10 +153,15 @@ func validateXeFilter(filter2validate string) bool {
 	return false
 }
 
-func getVmData(uuid string, param string) string {
+// getVMAttribute gets the attributes of a vm by the specified uuid.
+//
+// Result of this function is an array of strings which contain one of the following:
+// * uuids of snapshots or vbds, when parameter params is parent or snapshot, e.g. params=snapshots
+// * atrribute value, when parameter params is one concrete attribute, e.g. params=name-description
+func getVMAttribute(uuid string, params string) []string {
 
 	// run xe vm-list --minimal to get all uuids of vms in a comma separated list
-	cmd := exec.Command(xeBinary, "vm-list", "uuid="+uuid, "params="+param, "--minimal")
+	cmd := exec.Command(xeBinary, "vm-list", "uuid="+uuid, params, "--minimal")
 	// buffer to read cmd output
 	var out bytes.Buffer
 	//assign cmd stdout to buffer
@@ -166,39 +174,122 @@ func getVmData(uuid string, param string) string {
 	}
 
 	//return array of uuids of all vms
-	return string(out.Bytes())
+	return strings.Split(string(out.Bytes()), ",")
 }
 
-func getVm(uuid string) map[string]string {
+// getVMDetails returns the vm informations as map of attributes
+// The attribute name-label is got by function getVmObjectsAsUuidList
+func getVMDetails(uuid string) map[string]string {
 	var vm map[string]string
 	vm = make(map[string]string)
 	vm["uuid"] = uuid
-	vm["name-label"] = getVmData(uuid, "name-label")
+	vm["name-label"] = getVMAttribute(uuid, "params=name-label")[0]
 	return vm
 }
 
-func getVmSnapshots(uuid string) []string {
-	return nil
+// getVMSnapshots is getting all uuids of snapshots for vm with uuid.
+// Result is an array of all snapshot uuids.
+func getVMSnapshots(uuid string) []string {
+	return getVMAttribute(uuid, "params=snapshots")
 }
 
-func getVmSnapshot(uuid string) map[string]string {
-	return nil
+// getSnapshotDetails gets the value of an snapshot with the specified uuid.
+//
+// All attributes with its values were returned as map of strings.
+func getSnapshotDetails(uuid string) map[string]string {
+	var s map[string]string
+	s = make(map[string]string)
+	s["uuid"] = uuid
+	s["name-lable"] = getSnapshotAttribute(uuid, "params=name-lable")[0]
+	s["name-description"] = getSnapshotAttribute(uuid, "params=name-description")[0]
+	s["is-vmss-snapshot"] = getSnapshotAttribute(uuid, "params=is-vmss-snapshot")[0]
+	return s
 }
 
-func getVmVbds(uuid string) []string {
-	return nil
+// getSnapshotAttribute gets the value(s) for the attribute specified with parameter param.
+//
+// The result is an array of strings with the attribute values.
+func getSnapshotAttribute(uuid string, param string) []string {
+	// run xe snapshot-list --minimal to get all uuids of vbds of the vm in a comma separated list
+	cmd := exec.Command(xeBinary, "snapshot-list", "uuid="+uuid, param, "--minimal")
+	// buffer to read cmd output
+	var out bytes.Buffer
+	//assign cmd stdout to buffer
+	cmd.Stdout = &out
+
+	// check command for errors
+	err := cmd.Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	//return array of uuids of all vms
+	return strings.Split(string(out.Bytes()), ",")
 }
 
-func getVmVbd(uuid string) map[string]string {
-	return nil
+// getVMParents gets all parent uuids of the vm specified by the uuid.
+// Result is an array of uuids from all parents of the vm (by uuid).
+func getVMParents(uuid string) []string {
+	return getVMAttribute(uuid, "params=parent")
 }
 
-func getVmParents(uuid string) []string {
-	return nil
+// getParentDetails gets the value of an attribute of a vm with the specified uuid.
+//
+// All attributes with its values were returned as map of strings.
+func getParentDetails(uuid string) map[string]string {
+	var p map[string]string
+	p = make(map[string]string)
+	p["uuid"] = uuid
+	p["selfparent"] = getVMAttribute(uuid, "params=selfparent")[0]
+	return p
 }
 
-func getVmParent(uuid string) map[string]string {
-	return nil
+// getVMVbds gets all vbds of the virtual machine with the given uuid.
+// Result is an array of uuids of all vbds corresponding to the vm.
+func getVMVbds(uuid string) []string {
+	// run xe vbd-list --minimal to get all uuids of vbds of the vm in a comma separated list
+	cmd := exec.Command(xeBinary, "vbd-list", "vm-uuid="+uuid, "type=Disk", "--minimal")
+	// buffer to read cmd output
+	var out bytes.Buffer
+	//assign cmd stdout to buffer
+	cmd.Stdout = &out
+
+	// check command for errors
+	err := cmd.Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	//return array of uuids of all vms
+	return strings.Split(string(out.Bytes()), ",")
+}
+
+// getVbdAttribute gets the attribute values specified by the parameter param of a vbd specified by the parameter uuid.
+func getVbdAttribute(uuid string, param ...string) []string {
+	// run xe vbd-list --minimal to get all uuids of vbds of the vm in a comma separated list
+	cmd := exec.Command(xeBinary, "vbd-list", "uuid="+uuid, "type=Disk", strings.Join(param, " "), "--minimal")
+	// buffer to read cmd output
+	var out bytes.Buffer
+	//assign cmd stdout to buffer
+	cmd.Stdout = &out
+
+	// check command for errors
+	err := cmd.Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	//return array of uuids of all vms
+	return strings.Split(string(out.Bytes()), ",")
+}
+
+// getVbdDetails gets all details about the vbd with uuid parameter.
+func getVbdDetails(uuid string) map[string]string {
+	var vb map[string]string
+	vb = make(map[string]string)
+	vb["uuid"] = uuid
+	vb["vdi-name-label"] = getVMAttribute(uuid, "params=")[0]
+	return vb
 }
 
 // generateExampleXML creates a vm with all supported devices,
@@ -229,56 +320,60 @@ func generateExampleXML() VirtualMachines {
 }
 
 // generate the XML object for a single vm by its uuid
-func generateVmXML(uuid string) VirtualMachine {
+func generateVMXML(uuid string) VirtualMachine {
 
 	// creating snapshot objects
 	Sn := &Snapshots{}
-	var tempSnapshots []string = getVmSnapshots(uuid)
+	var tempSnapshots []string = getVMSnapshots(uuid)
 
 	// iterating over all snapshot uuid for vm with uuid
 	for index := 0; index < len(tempSnapshots); index++ {
-		var tempSnapshot map[string]string = getVmSnapshot(tempSnapshots[index])
+		var tempSnapshot map[string]string = getSnapshotDetails(tempSnapshots[index])
 		s := &Snapshot{UUID: tempSnapshot["uuid"], NameLable: tempSnapshot["name-label"], NameDescription: tempSnapshot["name-description"], IsVmssSnapshot: tempSnapshot["is-vmss-snapshot"]}
 		Sn.Snaps = append(Sn.Snaps, *s)
 	}
 
 	// creating VBDs objects
 	VBn := &VBDS{}
-	var tempVbds []string = getVmVbds(uuid)
+	var tempVbds []string = getVMVbds(uuid)
 
 	// iterating over all vbd uuid for vm with uuid
 	for index := 0; index < len(tempSnapshots); index++ {
-		var tempVbd map[string]string = getVmVbd(tempVbds[index])
+		var tempVbd map[string]string = getVbdDetails(tempVbds[index])
 		vb := &VBD{UUID: tempVbd["uuid"], VbdType: tempVbd["type"], VdiNameLabel: tempVbd["vdi-name-label"]}
 		VBn.Vbds = append(VBn.Vbds, *vb)
 	}
 
 	// creating Parent objects
 	Pn := &Parents{}
-	var tempParents []string = getVmParents(uuid)
+	var tempParents []string = getVMParents(uuid)
 
 	// iterating over all parent uuid for parent with uuid
 	for index := 0; index < len(tempParents); index++ {
-		var tempParent map[string]string = getVmParent(tempParents[index])
+		var tempParent map[string]string = getParentDetails(tempParents[index])
 		ptemp, _ := strconv.ParseBool(tempParent["selfparent"])
 		p := &Parent{UUID: tempParent["uuid"], Selfparent: ptemp}
 		Pn.Ps = append(Pn.Ps, *p)
 	}
 
 	// creating our vm with all attributes
-	var tempVm map[string]string = getVm(uuid)
-	vm := &VirtualMachine{NameLabel: tempVm["name-label"], UUID: tempVm["uuid"], Ps: *Pn, VBDs: *VBn, Snaps: *Sn}
+	var tempVM map[string]string = getVMDetails(uuid)
+	vm := &VirtualMachine{NameLabel: tempVM["name-label"], UUID: tempVM["uuid"], Ps: *Pn, VBDs: *VBn, Snaps: *Sn}
 
 	return *vm
 }
 
+// generateVmsXML creates the object of virtual machines for XML generation.
+// As parameter is an array of uuids of the virtual machines given.
 func generateVmsXML(uuids []string) VirtualMachines {
 	VMn := &VirtualMachines{}
+	// we iterate over all uuids
 	for index := 0; index < len(uuids); index++ {
-		var tempVm VirtualMachine = generateVmXML(uuids[index])
-		VMn.Vms = append(VMn.Vms, tempVm)
+		// create an vm object
+		var tempVM VirtualMachine = generateVMXML(uuids[index])
+		// appended the created vm object to the result object
+		VMn.Vms = append(VMn.Vms, tempVM)
 	}
-
 	return *VMn
 }
 
@@ -289,7 +384,7 @@ func main() {
 	parseCommandOptions()
 
 	// to generate an example XML file with one VM comment out the following line
-	vms := generateExampleXML()
+	vms := generateVmsXML(getVMs("power-state=running"))
 
 	// create the export file
 	file, _ := os.Create(exportFile)
