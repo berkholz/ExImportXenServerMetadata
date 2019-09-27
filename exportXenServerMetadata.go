@@ -109,6 +109,23 @@ func parseCommandOptions() {
 	}
 }
 
+// validateXeFilter does a rudimentary validation of the given
+// filter as string for the xe command and returns true if
+// filter is correct otherwise false.
+//
+// Actually only the following filter are supported:
+// * power-state=runningreturn getVmObjectsAsUuidList(uuid, "params=snapshots")
+func validateXeFilter(filter2validate string) bool {
+	switch filter2validate {
+	case "power-state=running":
+		log.Printf("Using filter %v", filter2validate)
+		return true
+	default:
+		log.Printf("No filter defined, using none.")
+	}
+	return false
+}
+
 // getVMs returns an array of all uuid of vms via xe command line.
 // The set of vms can be filtered by xe command line filter, e.g. power-state=running.
 // For filter, please consult the xe command line reference:
@@ -136,21 +153,14 @@ func getVMs(xefilter string) []string {
 	return strings.Split(string(out.Bytes()), ",")
 }
 
-// validateXeFilter does a rudimentary validation of the given
-// filter as string for the xe command and returns true if
-// filter is correct otherwise false.
-//
-// Actually only the following filter are supported:
-// * power-state=runningreturn getVmObjectsAsUuidList(uuid, "params=snapshots")
-func validateXeFilter(filter2validate string) bool {
-	switch filter2validate {
-	case "power-state=running":
-		log.Printf("Using filter %v", filter2validate)
-		return true
-	default:
-		log.Printf("No filter defined, using none.")
-	}
-	return false
+// getVMDetails returns the vm informations as map of attributes
+// The attribute name-label is got by function getVmObjectsAsUuidList
+func getVMDetails(uuid string) map[string]string {
+	var vm map[string]string
+	vm = make(map[string]string)
+	vm["uuid"] = uuid
+	vm["name-label"] = getVMAttribute(uuid, "params=name-label")[0]
+	return vm
 }
 
 // getVMAttribute gets the attributes of a vm by the specified uuid.
@@ -175,16 +185,6 @@ func getVMAttribute(uuid string, params string) []string {
 
 	//return array of uuids of all vms
 	return strings.Split(string(out.Bytes()), ",")
-}
-
-// getVMDetails returns the vm informations as map of attributes
-// The attribute name-label is got by function getVmObjectsAsUuidList
-func getVMDetails(uuid string) map[string]string {
-	var vm map[string]string
-	vm = make(map[string]string)
-	vm["uuid"] = uuid
-	vm["name-label"] = getVMAttribute(uuid, "params=name-label")[0]
-	return vm
 }
 
 // getVMSnapshots is getting all uuids of snapshots for vm with uuid.
@@ -233,17 +233,6 @@ func getVMParents(uuid string) []string {
 	return getVMAttribute(uuid, "params=parent")
 }
 
-// getParentDetails gets the value of an attribute of a vm with the specified uuid.
-//
-// All attributes with its values were returned as map of strings.
-func getParentDetails(uuid string) map[string]string {
-	var p map[string]string
-	p = make(map[string]string)
-	p["uuid"] = uuid
-	p["selfparent"] = getVMAttribute(uuid, "params=selfparent")[0]
-	return p
-}
-
 // getVMVbds gets all vbds of the virtual machine with the given uuid.
 // Result is an array of uuids of all vbds corresponding to the vm.
 func getVMVbds(uuid string) []string {
@@ -262,6 +251,17 @@ func getVMVbds(uuid string) []string {
 
 	//return array of uuids of all vms
 	return strings.Split(string(out.Bytes()), ",")
+}
+
+// getParentDetails gets the value of an attribute of a vm with the specified uuid.
+//
+// All attributes with its values were returned as map of strings.
+func getParentDetails(uuid string) map[string]string {
+	var p map[string]string
+	p = make(map[string]string)
+	p["uuid"] = uuid
+	p["selfparent"] = getVMAttribute(uuid, "params=selfparent")[0]
+	return p
 }
 
 // getVbdAttribute gets the attribute values specified by the parameter param of a vbd specified by the parameter uuid.
