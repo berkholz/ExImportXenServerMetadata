@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -16,10 +17,11 @@ import (
 
 // ################## global variables
 
-const appVersion string = "0.1"
+const appVersion string = "0.2"
 
 // filename with xml meta data information
 var exportFile string = ""
+var importFile string = ""
 
 // xe binary which is used to import the metadata
 var xeBinary string = "/usr/bin/xe"
@@ -89,7 +91,8 @@ type Snapshot struct {
 func parseCommandOptions() {
 	//flag.StringVar(&xeBinary, "xebinary", xeBinary, "Absolute path to xe binary including executable.")
 
-	flag.StringVar(&exportFile, "outfile", exportFile, "Filename with meta data to export.")
+	flag.StringVar(&exportFile, "exportFile", exportFile, "Filename with meta data to export.")
+	flag.StringVar(&importFile, "importFile", importFile, "Filename with meta data for importing or for exporting.")
 
 	// The flag package provides a default help printer via -h switch
 	var versionFlag *bool = flag.Bool("v", false, "Print the version number.")
@@ -102,11 +105,29 @@ func parseCommandOptions() {
 		os.Exit(0)
 	}
 
-	// check if an outfile is specified.
-	if len(exportFile) == 0 {
-		exportFile = "vms.export.example.xml"
-		log.Fatal("No export file given. Exiting...")
+	// check if an outfile and/or an infile is specified.
+	switch {
+	// ntohing given
+	case len(exportFile) == 0 && len(importFile) == 0:
+		//exportFile = "vms.export.example.xml"
+		log.Fatal("No file name given. Exiting...")
+	// both files given
+	case len(exportFile) != 0 && len(importFile) != 0:
+		log.Fatal("Export and import file given. Only one is allowed. Exiting...")
+	// export file given
+	case len(exportFile) != 0 && len(importFile) == 0:
+		path, err := exec.LookPath(exportFile)
+		if err == nil {
+			fmt.Printf("%v allready exists. Overwriting per default.", path)
+		}
+	// import file given
+	case len(importFile) != 0 && len(exportFile) == 0:
+		path, err := exec.LookPath(importFile)
+		if err == nil {
+			log.Fatalf("Could not find %v. Exiting...", path)
+		}
 	}
+
 }
 
 // validateXeFilter does a rudimentary validation of the given
@@ -377,26 +398,58 @@ func generateVmsXML(uuids []string) VirtualMachines {
 	return *VMn
 }
 
+// ######################################################################
+// #######################  MAIN  #######################################
+// ######################################################################
 func main() {
-	// ################## variable definitions
-
 	// parse command line options
 	parseCommandOptions()
 
-	// to generate an example XML file with one VM comment out the following line
-	vms := generateVmsXML(getVMs("power-state=running"))
+	if len(exportFile) != 0 {
+		// to generate an example XML file with one VM comment out the following line
+		vms := generateVmsXML(getVMs("power-state=running"))
 
-	// create the export file
-	file, _ := os.Create(exportFile)
+		// create the export file
+		file, _ := os.Create(exportFile)
 
-	// get an writer for the export file
-	xmlWriter := io.Writer(file)
+		// get an writer for the export file
+		xmlWriter := io.Writer(file)
 
-	enc := xml.NewEncoder(xmlWriter)
-	enc.Indent("  ", "    ")
+		enc := xml.NewEncoder(xmlWriter)
+		enc.Indent("  ", "    ")
 
-	if err := enc.Encode(vms); err != nil {
-		fmt.Printf("error: %vms\n", err)
+		if err := enc.Encode(vms); err != nil {
+			fmt.Printf("error: %vms\n", err)
+		}
+	} else if len(importFile) != 0 {
+		// we initialize our Users array
+		var vms VirtualMachines
+
+		// read in the import file
+		xmlInputFile, err := os.Open(importFile)
+
+		if err != nil {
+			log.Fatal(err)
+		} else {
+			fmt.Println("Successfully Opened " + importFile)
+		}
+
+		defer xmlInputFile.Close()
+
+		// read our opened xmlFile as a byte array.
+		byteValue, _ := ioutil.ReadAll(xmlInputFile)
+
+		// we unmarshal our byteArray which contains our
+		// xmlFiles content into 'users' which we defined above
+		xml.Unmarshal(byteValue, &vms)
+
+		// fmt.Printf("--> VMs %+v", virtualMachines)
+
+		for index, element := range vms.Vms {
+			fmt.Printf("%v : %v (%v)\n", index, element.UUID, element.NameLabel)
+		}
+	} else {
+		log.Fatalf("Unknown error. Please check parameter checking. Exiting.")
 	}
 	//fmt.Printf("--> VMs %+v", vms)
 }
